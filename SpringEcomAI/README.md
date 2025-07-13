@@ -2,7 +2,7 @@
 
 ## 📘 Executive Summary
 
-The **AI-Powered E-Commerce Product Management System** is a feature-rich, intelligent backend platform built using **Spring Boot 3.3.3** and **Java 21**. It provides REST APIs for robust product and order management. Integrated with **Spring AI**, **OpenAI GPT-4o**, and **PGVector**, it enables smart chatbot-based customer support and semantic order/product search capabilities. The backend can be easily paired with any modern React frontend for a complete e-commerce experience.
+The **AI-Powered E-Commerce Product Management System** is a feature-rich, intelligent backend platform built using **Spring Boot 3.5.3** and **Java 21**. It provides REST APIs for robust product and order management. Integrated with **Spring AI**, **OpenAI GPT-4o**, and **PGVector**, it enables smart chatbot-based customer support and semantic order/product search capabilities. The backend can be easily paired with any modern React frontend for a complete e-commerce experience.
 
 ---
 
