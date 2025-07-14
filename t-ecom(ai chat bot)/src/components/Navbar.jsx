@@ -129,6 +129,7 @@ const handleLinkClick = () => {
     "Electronics",
     "Toys",
     "Fashion",
+    "Other",
   ];
   
   return (

@@ -7,7 +7,7 @@ const AddProduct = () => {
   const [product, setProduct] = useState({
     name: "",
     brand: "",
-    description: "",
+    description: "", // Now optional
     price: "",
     category: "",
     stockQuantity: "",
@@ -17,13 +17,17 @@ const AddProduct = () => {
 
   const baseUrl = import.meta.env.VITE_BASE_URL;
 
-  const [image, setImage] = useState(null);
+  const [image, setImage] = useState(null); // Now optional
   const [loading, setLoading] = useState(false);
   const [validated, setValidated] = useState(false);
   const [errors, setErrors] = useState({});
   const [showModal, setShowModal] = useState(false);
   const [aiPrompt, setAiPrompt] = useState("");
   const [generatingProduct, setGeneratingProduct] = useState(false);
+  const [generatingDescription, setGeneratingDescription] = useState(false);
+  const [generatingImage, setGeneratingImage] = useState(false);
+  const [aiGeneratedImage, setAiGeneratedImage] = useState(null);
+  const [imagePreview, setImagePreview] = useState(null);
 
   const navigate = useNavigate();
 
@@ -43,9 +47,15 @@ const AddProduct = () => {
   const handleImageChange = (e) => {
     const file = e.target.files[0];
     setImage(file);
+    setAiGeneratedImage(null); // Clear AI generated image when user uploads a file
     
-    // Validate image
+    // Create preview
     if (file) {
+      const reader = new FileReader();
+      reader.onload = (e) => setImagePreview(e.target.result);
+      reader.readAsDataURL(file);
+      
+      // Validate image
       const validTypes = ['image/jpeg', 'image/png'];
       if (!validTypes.includes(file.type)) {
         setErrors({
@@ -63,6 +73,8 @@ const AddProduct = () => {
           image: null
         });
       }
+    } else {
+      setImagePreview(null);
     }
   };
 
@@ -72,7 +84,8 @@ const AddProduct = () => {
     // Validate required fields
     if (!product.name.trim()) newErrors.name = "Product name is required";
     if (!product.brand.trim()) newErrors.brand = "Brand is required";
-    if (!product.description.trim()) newErrors.description = "Description is required";
+    
+    // Description is optional - no validation needed
     
     // Price validation
     if (!product.price) {
@@ -94,11 +107,110 @@ const AddProduct = () => {
     // Release date validation
     if (!product.releaseDate) newErrors.releaseDate = "Release date is required";
     
-    // Image validation
-    if (!image) newErrors.image = "Product image is required";
+    // Image validation - check both uploaded file and AI generated image
+    if (image) {
+      // Only validate uploaded file properties
+      const validTypes = ['image/jpeg', 'image/png'];
+      if (!validTypes.includes(image.type)) {
+        newErrors.image = "Please select a valid image file (JPEG or PNG)";
+      } else if (image.size > 5 * 1024 * 1024) {
+        newErrors.image = "Image size should be less than 5MB";
+      }
+    }
+    // AI generated images are always valid (created by our system)
     
     setErrors(newErrors);
     return Object.keys(newErrors).length === 0;
+  };
+
+  const generateDescription = async () => {
+    if (!product.name.trim() || !product.category) {
+      toast.warning("Please enter product name and select a category first");
+      return;
+    }
+
+    setGeneratingDescription(true);
+
+    try {
+      const response = await axios.post(
+        `${baseUrl}/api/product/generate-description`,
+        null,
+        {
+          params: {
+            name: product.name,
+            category: product.category
+          }
+        }
+      );
+
+      if (response.data) {
+        setProduct({
+          ...product,
+          description: response.data
+        });
+        toast.success("Description generated successfully!");
+      }
+    } catch (error) {
+      console.error("Error generating description:", error);
+      if (error.response && error.response.data) {
+        toast.error(`Error: ${error.response.data}`);
+      } else {
+        toast.error("Failed to generate description. Please try again.");
+      }
+    } finally {
+      setGeneratingDescription(false);
+    }
+  };
+
+  const generateImage = async () => {
+    if (!product.name.trim() || !product.category || !product.description.trim()) {
+      toast.warning("Please enter product name, category, and description first");
+      return;
+    }
+
+    setGeneratingImage(true);
+
+    try {
+      const response = await axios.post(
+        `${baseUrl}/api/product/generate-image`,
+        null,
+        {
+          params: {
+            name: product.name,
+            category: product.category,
+            description: product.description
+          },
+          responseType: 'arraybuffer' // Important for handling byte array response
+        }
+      );
+
+      if (response.data) {
+        // Convert byte array to blob and create URL
+        const blob = new Blob([response.data], { type: 'image/jpeg' });
+        const imageUrl = URL.createObjectURL(blob);
+        
+        // Set AI generated image
+        setAiGeneratedImage({
+          blob: blob,
+          url: imageUrl
+        });
+        setImagePreview(imageUrl);
+        setImage(null); // Clear file input
+        
+        toast.success("Image generated successfully!");
+      }
+    } catch (error) {
+      console.error("Error generating image:", error);
+      if (error.response && error.response.data) {
+        // Convert arraybuffer error to string
+        const errorMessage = new TextDecoder().decode(error.response.data);
+        toast.error(`Error: ${errorMessage}`);
+      } else {
+        toast.error("Failed to generate image. Please try again.");
+      }
+    } finally {
+      setGeneratingImage(false);
+    }
   };
 
   const submitHandler = (event) => {
@@ -116,7 +228,19 @@ const AddProduct = () => {
     
     setLoading(true);
     const formData = new FormData();
-    formData.append("imageFile", image);
+    
+    // Handle image - prioritize uploaded file over AI generated
+    if (image) {
+      formData.append("imageFile", image);
+    } else if (aiGeneratedImage) {
+      // Convert AI generated image blob to file
+      const file = new File([aiGeneratedImage.blob], "ai-generated-image.jpg", {
+        type: "image/jpeg"
+      });
+      formData.append("imageFile", file);
+    }
+    // If neither image nor aiGeneratedImage exists, no image is appended (maintains original optional behavior)
+    
     formData.append(
       "product",
       new Blob([JSON.stringify(product)], { type: "application/json" })
@@ -130,7 +254,24 @@ const AddProduct = () => {
       })
       .then((response) => {
         console.log("Product added successfully:", response.data);
-        toast.success('Product added successfully')
+        toast.success('Product added successfully');
+        // Reset form state after successful submission
+        setProduct({
+          name: "",
+          brand: "",
+          description: "",
+          price: "",
+          category: "",
+          stockQuantity: "",
+          releaseDate: "",
+          productAvailable: false,
+        });
+        setImage(null);
+        setAiGeneratedImage(null);
+        setImagePreview(null);
+        setValidated(false);
+        setErrors({});
+        navigate('/');
       })
       .catch((error) => {
         console.error("Error adding product:", error);
@@ -140,14 +281,13 @@ const AddProduct = () => {
         } else {
           toast.error('Error adding product')
         }
-      }).finally(()=>{
-        setLoading(false);
-        navigate('/');
+        setLoading(false); // Only set loading false on error, success navigates away
       });
   };
 
   const handleGenerate = async () => {
     if (!aiPrompt.trim()) {
+      toast.warning("Please enter a product description");
       return;
     }
     
@@ -157,26 +297,25 @@ const AddProduct = () => {
       const response = await axios.post(`${baseUrl}/api/product/generate-product?query=${encodeURIComponent(aiPrompt)}`);
       console.log(response, 'generated response');
       
-      // Update the form with the generated product data
       if (response.data) {
         const generatedProduct = response.data;
-        
-        // Update only the fields that exist in the response
-        // setProduct({
-        //   ...product,
-        //   name: generatedProduct.name || product.name,
-        //   brand: generatedProduct.brand || product.brand,
-        //   description: generatedProduct.description || product.description,
-        //   price: generatedProduct.price || product.price,
-        //   category: generatedProduct.category || product.category,
-        //   stockQuantity: generatedProduct.stockQuantity || product.stockQuantity
-        // });
+        // Set the generated product data to form
+        setProduct({
+          name: generatedProduct.name || "",
+          brand: generatedProduct.brand || "",
+          description: generatedProduct.description || "",
+          price: generatedProduct.price || "",
+          category: generatedProduct.category || "",
+          stockQuantity: generatedProduct.stockQuantity || "",
+          releaseDate: generatedProduct.releaseDate || "",
+          productAvailable: generatedProduct.productAvailable || false,
+        });
+        toast.success('Product generated successfully!');
       }
       
       // Close the modal
       setShowModal(false);
       setAiPrompt("");
-      navigate('/');
     } catch (error) {
       console.log(error);
       toast.error("Error generating product. Please try again.");
@@ -184,6 +323,10 @@ const AddProduct = () => {
       setGeneratingProduct(false);
     }
   };
+
+  // Check if AI generation features are available
+  const canGenerateDescription = product.name.trim() && product.category;
+  const canGenerateImage = product.name.trim() && product.category && product.description.trim();
 
   return (
     <div className="container mt-5 pt-5">
@@ -223,20 +366,70 @@ const AddProduct = () => {
                   />
                   {errors.brand && <div className="invalid-feedback">{errors.brand}</div>}
                 </div>
+
+                <div className="col-md-4">
+                  <label htmlFor="category" className="form-label fw-bold">Category</label>
+                  <select
+                    className={`form-select ${validated ? (errors.category ? 'is-invalid' : 'is-valid') : ''}`}
+                    value={product.category}
+                    onChange={handleInputChange}
+                    name="category"
+                    id="category"
+                    required
+                  >
+                    <option value="">Select category</option>
+                    <option value="Laptop">Laptop</option>
+                    <option value="Headphone">Headphone</option>
+                    <option value="Mobile">Mobile</option>
+                    <option value="Electronics">Electronics</option>
+                    <option value="Toys">Toys</option>
+                    <option value="Fashion">Fashion</option>
+                    <option value="Other">Other</option>
+                  </select>
+                  {errors.category && <div className="invalid-feedback">{errors.category}</div>}
+                </div>
                 
                 <div className="col-12">
-                  <label htmlFor="description" className="form-label fw-bold">Description</label>
+                  <div className="d-flex justify-content-between align-items-center mb-2">
+                    <label htmlFor="description" className="form-label fw-bold mb-0">
+                      Description <span className="text-muted">(Optional)</span>
+                    </label>
+                    <button
+                      type="button"
+                      className={`btn btn-sm btn-outline-primary ${!canGenerateDescription ? 'disabled' : ''}`}
+                      onClick={generateDescription}
+                      disabled={!canGenerateDescription || generatingDescription}
+                      title={!canGenerateDescription ? "Please enter product name and select category first" : "Generate description with AI"}
+                    >
+                      {generatingDescription ? (
+                        <>
+                          <span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                          Generating...
+                        </>
+                      ) : (
+                        <>
+                          <i className="bi bi-robot me-1"></i>
+                          Generate with AI
+                        </>
+                      )}
+                    </button>
+                  </div>
                   <textarea
-                    className={`form-control ${validated ? (errors.description ? 'is-invalid' : 'is-valid') : ''}`}
-                    placeholder="Add product description"
+                    className={`form-control ${validated && errors.description ? 'is-invalid' : ''}`}
+                    placeholder="Add product description (optional) or use AI to generate one"
                     value={product.description}
                     name="description"
                     onChange={handleInputChange}
                     id="description"
-                    required
-                    rows="3"
+                    rows="4"
                   />
                   {errors.description && <div className="invalid-feedback">{errors.description}</div>}
+                  {!canGenerateDescription && (
+                    <div className="form-text text-muted">
+                      <i className="bi bi-info-circle me-1"></i>
+                      Fill in product name and category to enable AI description generation
+                    </div>
+                  )}
                 </div>
                 
                 <div className="col-md-4">
@@ -259,26 +452,7 @@ const AddProduct = () => {
                   </div>
                 </div>
              
-                <div className="col-md-4">
-                  <label htmlFor="category" className="form-label fw-bold">Category</label>
-                  <select
-                    className={`form-select ${validated ? (errors.category ? 'is-invalid' : 'is-valid') : ''}`}
-                    value={product.category}
-                    onChange={handleInputChange}
-                    name="category"
-                    id="category"
-                    required
-                  >
-                    <option value="">Select category</option>
-                    <option value="Laptop">Laptop</option>
-                    <option value="Headphone">Headphone</option>
-                    <option value="Mobile">Mobile</option>
-                    <option value="Electronics">Electronics</option>
-                    <option value="Toys">Toys</option>
-                    <option value="Fashion">Fashion</option>
-                  </select>
-                  {errors.category && <div className="invalid-feedback">{errors.category}</div>}
-                </div>
+            
 
                 <div className="col-md-4">
                   <label htmlFor="stockQuantity" className="form-label fw-bold">Stock Quantity</label>
@@ -311,17 +485,78 @@ const AddProduct = () => {
                 </div>
                 
                 <div className="col-md-8">
-                  <label htmlFor="imageFile" className="form-label fw-bold">Image</label>
+                  <div className="d-flex justify-content-between align-items-center mb-2">
+                    <label htmlFor="imageFile" className="form-label fw-bold mb-0">
+                      Image <span className="text-muted">(Optional)</span>
+                    </label>
+                    <button
+                      type="button"
+                      className={`btn btn-sm btn-outline-success ${!canGenerateImage ? 'disabled' : ''}`}
+                      onClick={generateImage}
+                      disabled={!canGenerateImage || generatingImage}
+                      title={!canGenerateImage ? "Please enter product name, category, and description first" : "Generate image with AI"}
+                    >
+                      {generatingImage ? (
+                        <>
+                          <span className="spinner-border spinner-border-sm me-1" role="status" aria-hidden="true"></span>
+                          Generating...
+                        </>
+                      ) : (
+                        <>
+                          <i className="bi bi-image me-1"></i>
+                          Generate with AI
+                        </>
+                      )}
+                    </button>
+                  </div>
                   <input
-                    className={`form-control ${validated ? (errors.image ? 'is-invalid' : 'is-valid') : ''}`}
+                    className={`form-control ${validated && errors.image ? 'is-invalid' : ''}`}
                     type="file"
                     onChange={handleImageChange}
                     id="imageFile"
                     accept="image/png, image/jpeg"
-                    required
                   />
                   {errors.image && <div className="invalid-feedback">{errors.image}</div>}
-                  <div className="form-text">Upload a product image (JPG, PNG)</div>
+                  <div className="form-text">Upload a product image (JPG, PNG) or generate one with AI</div>
+                  
+                  {/* Image Preview */}
+                  {imagePreview && (
+                    <div className="mt-3">
+                      <div className="d-flex justify-content-between align-items-center mb-2">
+                        <small className="text-muted">
+                          {aiGeneratedImage ? "AI Generated Image Preview:" : "Selected Image Preview:"}
+                        </small>
+                        <button
+                          type="button"
+                          className="btn btn-sm btn-outline-danger"
+                          onClick={() => {
+                            setImagePreview(null);
+                            setImage(null);
+                            setAiGeneratedImage(null);
+                            document.getElementById('imageFile').value = '';
+                          }}
+                        >
+                          <i className="bi bi-trash me-1"></i>
+                          Remove
+                        </button>
+                      </div>
+                      <div className="border rounded p-2 bg-light">
+                        <img 
+                          src={imagePreview} 
+                          alt="Preview" 
+                          className="img-fluid rounded"
+                          style={{ maxHeight: "200px", maxWidth: "100%", objectFit: "contain" }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                  
+                  {!canGenerateImage && (
+                    <div className="form-text text-muted mt-2">
+                      <i className="bi bi-info-circle me-1"></i>
+                      Fill in product name, category, and description to enable AI image generation
+                    </div>
+                  )}
                 </div>
                 
                 <div className="col-12">
@@ -343,7 +578,7 @@ const AddProduct = () => {
                 </div>
                 
                 <div className="col-12 mt-4">
-                  <div className="d-flex">
+                  <div className="d-flex gap-2">                  
                     {loading ? (
                       <button
                         className="btn btn-primary"
